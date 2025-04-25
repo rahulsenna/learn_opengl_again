@@ -1,4 +1,16 @@
 {
     // "workbench.editor.showTabs": "single", 
-    "hotreload_game_code_f4": true
+    "hotreload_game_code_f4": true,
+    "[cpp]": {
+        "editor.lineNumbers": "off",
+        "editor.lineDecorationsWidth": 0,
+        "editor.glyphMargin": false,
+    },
+    
+    "accessibility.signals.lineHasBreakpoint": {
+        "sound": "auto",
+        "announcement": "auto"
+    },
+
+
 }
