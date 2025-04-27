@@ -3,27 +3,36 @@
 #include <iostream>
 #include <cstdlib>
 
-typedef uint32_t Shader;
 
-inline void use_shader(Shader shader)
+unsigned int create_shader(const char*vertex_file, const char*fragment_file);
+struct Shader
 {
-    glUseProgram(shader);
-}
+    unsigned int ID;
+    
+    Shader(const char*vertex_file, const char*fragment_file)
+    {
+        ID = create_shader(vertex_file, fragment_file);
+    }
+    void use() const
+    {
+        glUseProgram(ID);
+    }
 
-inline void shader_set_bool(Shader ID, const std::string_view name, bool value)
-{
-    glUniform1i(glGetUniformLocation(ID, name.data()), (int)value);
-}
+    void set_bool(const std::string_view name, bool value) const
+    {
+        glUniform1i(glGetUniformLocation(ID, name.data()), (int)value);
+    }
 
-inline void shader_set_int(Shader ID, const std::string_view name, int value)
-{ 
-    glUniform1i(glGetUniformLocation(ID, name.data()), value); 
-}
+    void set_int(const std::string_view name, int value) const
+    { 
+        glUniform1i(glGetUniformLocation(ID, name.data()), value); 
+    }
 
-inline void shader_set_float(Shader ID, const std::string_view name, float value)
-{
-    glUniform1f(glGetUniformLocation(ID, name.data()), value);
-}
+    void set_float(const std::string_view name, float value) const
+    {
+        glUniform1f(glGetUniformLocation(ID, name.data()), value);
+    }
+};
 
 
 // Function to check shader compilation/linking errors
@@ -51,6 +60,7 @@ void check_shader_errors(GLuint shader, const char *type)
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <unistd.h>
+#include <cassert>
 
 std::string read_file(char const *fname)
 {
@@ -68,11 +78,12 @@ std::string read_file(char const *fname)
     uintmax_t lines = 0;
     size_t bytes_read = read(fd, buf, BUFFER_SIZE);
     buf[bytes_read] = 0;
+    assert(bytes_read<16*1024);
 
     return (buf);
 }
 
-Shader create_shader_from_source(const char*vertex_shader_source, const char*fragment_shader_source)
+unsigned int create_shader_from_source(const char*vertex_shader_source, const char*fragment_shader_source)
 {
     // Compile vertex shader
     GLuint vertex_shader = glCreateShader(GL_VERTEX_SHADER);
@@ -100,7 +111,7 @@ Shader create_shader_from_source(const char*vertex_shader_source, const char*fra
 }
 
 
-Shader create_shader(const char*vertex_file, const char*fragment_file)
+unsigned int create_shader(const char*vertex_file, const char*fragment_file)
 {
     auto vertex_source = read_file(vertex_file);
     auto fragment_source = read_file(fragment_file);

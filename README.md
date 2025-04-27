@@ -10,3 +10,7 @@ https://github.com/user-attachments/assets/7fe39f85-c3b5-4184-a44b-908d64b03a71
 ## ✅ Shaders
 
 https://github.com/user-attachments/assets/0f6e17dd-8cc0-4dfa-938c-336bfe7a4c0a
+
+
+## ✅ Textures
+https://github.com/user-attachments/assets/c8628471-2dae-4931-ac6b-50c146f43056

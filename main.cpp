@@ -2,9 +2,12 @@
 #include <GLFW/glfw3.h>
 #include <iostream>
 #include <cstdlib>
+#include <vector>
 
 #include "shader.cpp"
 
+#define STB_IMAGE_IMPLEMENTATION
+#include "stb_image.h"
 
 // Error callback for GLFW
 void errorCallback(int error, const char *description)
@@ -54,6 +57,128 @@ void load_game_code(GameCode *game_code)
     game_code->dll_last_write_time = get_last_write_time("libgame.dylib");
 }
 
+struct Quad
+{    
+    Shader shader;
+    std::vector<float> vertices;
+    std::vector<unsigned int> indices;
+    std::vector<unsigned int> textures;
+
+    GLuint VAO;
+    GLuint VBO;
+    GLuint EBO;
+    bool dynamic = false;
+
+    void upload_vertices()
+    {
+        // Create Vertex Array Object
+        glGenVertexArrays(1, &VAO);
+        glBindVertexArray(VAO);
+
+        // Create Vertex Buffer Object
+        glGenBuffers(1, &VBO);
+        glBindBuffer(GL_ARRAY_BUFFER, VBO);
+
+        glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr)vertices.size() * sizeof(vertices.front()), vertices.data(), dynamic?GL_DYNAMIC_DRAW:GL_STATIC_DRAW);
+
+        glGenBuffers(1, &EBO);
+        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, EBO);
+        glBufferData(GL_ELEMENT_ARRAY_BUFFER, (GLsizeiptr)indices.size() * sizeof(indices.front()), indices.data(), dynamic?GL_DYNAMIC_DRAW:GL_STATIC_DRAW);
+
+        // Set vertex attribute pointers
+        // Position attribute
+        glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void *)0);
+        glEnableVertexAttribArray(0);
+        // Color attribute
+        glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void *)(3 * sizeof(float)));
+        glEnableVertexAttribArray(1);
+
+        // UV attribute
+        glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void *)(6 * sizeof(float)));
+        glEnableVertexAttribArray(2);
+
+        // Unbind VAO
+        glBindVertexArray(0);
+    }
+    void upload_texture(const char *texture_file)
+    {    
+        unsigned int texture_id;
+        stbi_set_flip_vertically_on_load(true);
+        int img_width, img_height, img_nr_channels;
+        uint8_t *data = stbi_load(texture_file, &img_width, &img_height, &img_nr_channels, 0);
+        
+        if (!data) {
+            std::cerr << "Failed to load texture: " << texture_file << std::endl;
+            return;
+        }
+    
+        glGenTextures(1, &texture_id);
+        glBindTexture(GL_TEXTURE_2D, texture_id);
+    
+        // set the texture wrapping/filtering options (on the currently bound texture object)
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        
+        // Choose the correct format based on channels
+        GLint format;
+        if (img_nr_channels == 1)
+            format = GL_RED;
+        else if (img_nr_channels == 3)
+            format = GL_RGB;
+        else if (img_nr_channels == 4)
+            format = GL_RGBA;
+        else {
+            std::cerr << "Unsupported image format" << std::endl;
+            stbi_image_free(data);
+            return;
+        }
+    
+        glTexImage2D(GL_TEXTURE_2D, 0, format, img_width, img_height, 0, format, GL_UNSIGNED_BYTE, data);
+        glGenerateMipmap(GL_TEXTURE_2D);
+    
+        stbi_image_free(data);
+    
+        glEnable(GL_BLEND);
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+        // Get the texture unit index
+        auto texture_unit = textures.size();
+        
+        // Activate the correct texture unit
+        glActiveTexture(GL_TEXTURE0 + texture_unit);
+        glBindTexture(GL_TEXTURE_2D, texture_id);
+
+        std::string texture_name = "texture_" + std::to_string(texture_unit);
+        shader.set_int(texture_name, (int)texture_unit);
+        textures.push_back(texture_id);
+    }
+ 
+    void draw()
+    {
+        shader.use();
+        glBindVertexArray(VAO);
+        if (dynamic)
+        { 
+            glBindVertexArray(VBO);
+            glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr)vertices.size() * sizeof(vertices.front()), vertices.data(), GL_STATIC_DRAW);
+        }
+        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, EBO);
+ 
+        unsigned int tex_pos = GL_TEXTURE0;
+        for (auto texture: textures)
+        {
+            glActiveTexture(tex_pos++);
+            glBindTexture(GL_TEXTURE_2D, texture);
+        }       
+        glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
+        // Unbind VAO
+        glBindVertexArray(0);
+ 
+    }
+};
+
 int main()
 {
     // Initialize GLFW
@@ -102,193 +227,132 @@ int main()
 
     int nrAttributes;
     glGetIntegerv(GL_MAX_VERTEX_ATTRIBS, &nrAttributes);
-    std::cout << "Maximum nr of vertex attributes supported: " << nrAttributes << std::endl;    
-
-
-    Shader shader = create_shader("../res/shaders/1.vert", "../res/shaders/1.frag");
-    Shader secondShader = create_shader("../res/shaders/2.vert", "../res/shaders/2.frag");
-
-    // Vertex data for the triangle (position and color)
-
-    float vertices[] = {
-         0.5f,  0.5f,  0.0f,  1.0f,  0.0f, 0.0f,   // top right
-         0.5f, -0.3f,  0.0f,  0.0f,  1.0f, 0.0f,   // bottom right
-        -0.5f, -0.3f,  0.0f,  0.0f,  0.0f, 1.0f,   // bottom left
-        -0.5f,  0.5f,  0.0f,  .5f,    .5f, 0.0f,   // top left
-        
-      
-        -0.7f,  -0.6f,   0.0f,  1.0f,  0.0f, 0.0f,   // bottom right
-        -0.45f, -0.99f,  0.0f,  0.0f,  1.0f, 0.0f,   // bottom right
-        -0.95f, -0.99f,  0.0f,  0.0f,  0.0f, 1.0f,   // bottom left
-
-         0.7f,  -0.6f,   0.0f,  0.0f,  0.0f, 1.0f,   // bottom right
-         0.45f, -0.99f,  0.0f,  0.0f,  1.0f, 0.0f,   // bottom right
-         0.95f, -0.99f,  0.0f,  1.0f,  0.0f, 0.0f,   // bottom left
-
-    };
-    unsigned int indices[] = {
-
-        0, 1, 3, // first triangle
-        1, 2, 3, // second triangle
-        
-
-        4,5,6,7,8,9
-    };
-
+    std::cout << "Maximum nr of vertex attributes supported: " << nrAttributes << std::endl;
     // glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
 
-    // Create Vertex Array Object
-    GLuint VAO;
-    glGenVertexArrays(1, &VAO);
-    glBindVertexArray(VAO);
+    Quad flag = {.shader = Shader("../res/shaders/text1.vert", "../res/shaders/multi_text_quad1.frag"),
+                 .vertices = {
+                     /* pos */  0.5f,  0.5f, 0.0f, /* color */ 1.0f, 0.0f, 0.0f, /* uv */ 1, 1,   // top right
+                     /* pos */  0.5f, -0.3f, 0.0f, /* color */ 1.0f, 1.0f, 0.0f, /* uv */ 1, 0,  // bottom right
+                     /* pos */ -0.5f, -0.3f, 0.0f, /* color */ 0.0f, 0.0f, 1.0f, /* uv */ 0, 0, // bottom left
+                     /* pos */ -0.5f,  0.5f, 0.0f, /* color */ 0.0f, 1.0f, 1.0f, /* uv */ 0, 1,  // top left
+                 },
+                 .indices = {
+                     0, 1, 3, // first triangle
+                     1, 2, 3, // second triangle
+                 }};
+    flag.upload_vertices();
+    flag.upload_texture("../res/textures/us.png");
 
-    // Create Vertex Buffer Object
-    GLuint VBO;
-    glGenBuffers(1, &VBO);
-    glBindBuffer(GL_ARRAY_BUFFER, VBO);
-    glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
 
 
-    unsigned int EBO;
-    glGenBuffers(1, &EBO);
-    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, EBO);
-    glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(indices), indices, GL_STATIC_DRAW);
-
-    // Set vertex attribute pointers
-    // Position attribute
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), (void *)0);
-    glEnableVertexAttribArray(0);
-    // Color attribute
-    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), (void *)(3 * sizeof(float)));
-    glEnableVertexAttribArray(1);
-
-    // Unbind VAO
-    glBindVertexArray(0);
-
-    //----[ 2nd VAO ]------------------------------------------------------------------------------------------------------
-    float another_triangle[] = {
-            
-       -0.7f,   0.55f,   0.0f,  1.0f,  0.0f, 0.0f,   // bottom
-       -0.45f,  0.99f,   0.0f,  0.0f,  1.0f, 0.0f,   // top right
-       -0.95f,  0.99f,   0.0f,  0.0f,  0.0f, 1.0f,   // top left
-
-   };
-    // Create 2nd Vertex Array Object
-    GLuint VAO2;
-    glGenVertexArrays(1, &VAO2);
-    glBindVertexArray(VAO2);
-
-    // Create Vertex Buffer Object
-    GLuint VBO2;
-    glGenBuffers(1, &VBO2);
-    glBindBuffer(GL_ARRAY_BUFFER, VBO2);
-    glBufferData(GL_ARRAY_BUFFER, sizeof(another_triangle), another_triangle, GL_DYNAMIC_DRAW);
-
-    // Position attribute
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), (void *)0);
-    glEnableVertexAttribArray(0);
-    // Color attribute
-    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), (void *)(3 * sizeof(float)));
-    glEnableVertexAttribArray(1);
-    // Unbind VAO
-    glBindVertexArray(0);
-    //----[ 2nd VAO ]------------------------------------------------------------------------------------------------------
+    float plane_x = -1.;
+    float plane_y = .7;
+    Quad plane = {.shader = Shader("../res/shaders/text1.vert", "../res/shaders/text1.frag"),
+                  .vertices = {
+                      /* pos */ plane_x + 0.3f, plane_y + 0.3f, 0.0f, /* color */ 1.0f, 0.0f, 0.0f, /* uv */ 0, 0, // top right
+                      /* pos */ plane_x + 0.3f, plane_y + 0.0f, 0.0f, /* color */ 0.0f, 1.0f, 0.0f, /* uv */ 0, 1, // bottom right
+                      /* pos */ plane_x + 0.0f, plane_y + 0.0f, 0.0f, /* color */ 0.0f, 0.0f, 1.0f, /* uv */ 1, 1, // bottom left
+                      /* pos */ plane_x + 0.0f, plane_y + 0.3f, 0.0f, /* color */ 0.5f, 0.5f, 0.0f, /* uv */ 1, 0, // top left
+                  },
+                  .indices = {
+                      0, 1, 3, // first triangle
+                      1, 2, 3, // second triangle
+                  },
+                  .dynamic = true
+                };
+    plane.upload_vertices();
+    plane.upload_texture("../res/textures/chat_gpt_plane.png");
 
     // Main rendering loop
     float r = 0.2f, g = 0.3f, b = 0.3f, a = 1.0f;
 
     GameCode game_code = {};
     load_game_code(&game_code);
-    
-    // Triangle movement variables
+
+    // Plane movement variables
     float dx = 0.0f, dy = -0.005f;
     int direction = 0; // 0: down, 1: right, 2: up, 3: left
 
-    // Calculate original shape dimensions
-    float width = fabs(another_triangle[6] - another_triangle[12])/2.f; // ~0.5
-    float height = fabs(another_triangle[1] - another_triangle[7])/2.f; // ~0.44
-
-    auto patrol_triangle = [&]() -> void
+    auto patrol_plane = [&]() -> void
     {
         // Update all vertices
-        for (int i = 0; i < 3; i++)
+        for (int i = 0; i < 4; i++)
         {
-            another_triangle[i*6] += dx;
-            another_triangle[i*6 + 1] += dy;
+            plane.vertices[i * 8] += dx;
+            plane.vertices[i * 8 + 1] += dy;
         }
-        
+
         // Calculate center point for rotation
-        float cx = (another_triangle[0] + another_triangle[6] + another_triangle[12]) / 3.0f;
-        float cy = (another_triangle[1] + another_triangle[7] + another_triangle[13]) / 3.0f;
-        
+        float cx = (plane.vertices[0] + plane.vertices[8] + plane.vertices[16]) / 3.0f;
+        float cy = (plane.vertices[1] + plane.vertices[9] + plane.vertices[17]) / 3.0f;
+
         // Check boundaries and change direction
-        if (cy <= -0.7f && direction == 0)
+        // swap UVs for turning
+        if (cy <= -0.9f && direction == 0)
         {
             // Bottom edge - turn right
             direction = 1;
             dy = 0.0f;
             dx = 0.005f;
-            
-            // Reposition to point right while preserving shape
-            another_triangle[0] = cx - height;    // left
-            another_triangle[1] = cy - width;
-            another_triangle[6] = cx + height;    // right (point)
-            another_triangle[7] = cy;
-            another_triangle[12] = cx - height;   // left
-            another_triangle[13] = cy + width;
+
+            plane.vertices[8 * 0 + 6 + 0] = 0;
+            plane.vertices[8 * 0 + 6 + 1] = 1;
+            plane.vertices[8 * 1 + 6 + 0] = 1;
+            plane.vertices[8 * 1 + 6 + 1] = 1;
+            plane.vertices[8 * 2 + 6 + 0] = 1;
+            plane.vertices[8 * 2 + 6 + 1] = 0;
+            plane.vertices[8 * 3 + 6 + 0] = 0;
+            plane.vertices[8 * 3 + 6 + 1] = 0;
         }
-        else if (cx >= 0.7f && direction == 1)
+        else if (cx >= .9f && direction == 1)
         {
             // Right edge - turn up
             direction = 2;
             dx = 0.0f;
             dy = 0.005f;
-            
-            // Reposition to point up while preserving shape
-            another_triangle[0] = cx - width;     // bottom right
-            another_triangle[1] = cy - height;
-            another_triangle[6] = cx;               // top (point)
-            another_triangle[7] = cy + height;
-            another_triangle[12] = cx + width;    // bottom left
-            another_triangle[13] = cy - height;
+
+            plane.vertices[8 * 0 + 6 + 0] = 0;
+            plane.vertices[8 * 0 + 6 + 1] = 1;
+            plane.vertices[8 * 1 + 6 + 0] = 0;
+            plane.vertices[8 * 1 + 6 + 1] = 0;
+            plane.vertices[8 * 2 + 6 + 0] = 1;
+            plane.vertices[8 * 2 + 6 + 1] = 0;
+            plane.vertices[8 * 3 + 6 + 0] = 1;
+            plane.vertices[8 * 3 + 6 + 1] = 1;
         }
-        else if (cy >= 0.7f && direction == 2)
+        else if (cy >= .8 && direction == 2)
         {
             // Top edge - turn left
             direction = 3;
             dy = 0.0f;
             dx = -0.005f;
-            
-            // Reposition to point left while preserving shape
-            another_triangle[0] = cx + height;    // right
-            another_triangle[1] = cy + width;
-            another_triangle[6] = cx - height;    // left (point)
-            another_triangle[7] = cy;
-            another_triangle[12] = cx + height;   // right
-            another_triangle[13] = cy - width;
+
+            plane.vertices[8 * 0 + 6 + 0] = 1;
+            plane.vertices[8 * 0 + 6 + 1] = 0;
+            plane.vertices[8 * 1 + 6 + 0] = 0;
+            plane.vertices[8 * 1 + 6 + 1] = 0;
+            plane.vertices[8 * 2 + 6 + 0] = 0;
+            plane.vertices[8 * 2 + 6 + 1] = 1;
+            plane.vertices[8 * 3 + 6 + 0] = 1;
+            plane.vertices[8 * 3 + 6 + 1] = 1;
         }
-        else if (cx <= -0.7f && direction == 3)
+        else if (cx <= -0.8f && direction == 3)
         {
             // Left edge - turn down
             direction = 0;
             dx = 0.0f;
             dy = -0.005f;
-            
-            // Reposition to point down while preserving shape
-            another_triangle[0] = cx + width;     // top right
-            another_triangle[1] = cy + height;
-            another_triangle[6] = cx;               // bottom (point)
-            another_triangle[7] = cy - height;
-            another_triangle[12] = cx - width;    // top left
-            another_triangle[13] = cy + height;
-        }
 
-        //----[ 2nd VAO ]------------------------------------------------------------------------------------------------------
-        glBindVertexArray(0);
-        use_shader(shader);
-        glBindVertexArray(VAO2);
-        glDrawArrays(GL_TRIANGLES, 0, 3);
-        //----[ 2nd VAO ]------------------------------------------------------------------------------------------------------
+            plane.vertices[8 * 0 + 6 + 0] = 0;
+            plane.vertices[8 * 0 + 6 + 1] = 0;
+            plane.vertices[8 * 1 + 6 + 0] = 0;
+            plane.vertices[8 * 1 + 6 + 1] = 1;
+            plane.vertices[8 * 2 + 6 + 0] = 1;
+            plane.vertices[8 * 2 + 6 + 1] = 1;
+            plane.vertices[8 * 3 + 6 + 0] = 1;
+            plane.vertices[8 * 3 + 6 + 1] = 0;
+        }
     };
 
     while (!glfwWindowShouldClose(window))
@@ -312,36 +376,9 @@ int main()
         glClearColor(r, g, b, a);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
 
-        // Draw triangle
-        use_shader(shader);
-        glBindVertexArray(VAO);
-
-        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, EBO);
-        glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
-        use_shader(secondShader);
-        shader_set_float(secondShader, "greenUniform", sin(glfwGetTime()));
-        glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, (void *)(6 * sizeof(unsigned int)));
-        // Unbind VAO
-        glBindVertexArray(0);
-
-        
-        patrol_triangle();
-
-
-        glBindBuffer(GL_ARRAY_BUFFER, VBO2);
-        glBufferData(GL_ARRAY_BUFFER, sizeof(another_triangle), another_triangle, GL_DYNAMIC_DRAW);
-
-        // Position attribute
-        glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), (void *)0);
-        glEnableVertexAttribArray(0);
-        // Color attribute
-        glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), (void *)(3 * sizeof(float)));
-        glEnableVertexAttribArray(1);
-
-        
-        // Unbind VAO
-        glBindVertexArray(0);
-
+        flag.draw();
+        patrol_plane();
+        plane.draw();
 
         // Swap buffers and poll events
         glfwSwapBuffers(window);

@@ -13,6 +13,7 @@
                 "${workspaceFolder}/main.cpp",
                 "-I/opt/homebrew/Cellar/glew/2.2.0_1/include",
                 "-I/opt/homebrew/Cellar/glfw/3.4/include",
+                "-I${workspaceFolder}/includes",
                 "-L/opt/homebrew/Cellar/glfw/3.4/lib",
                 "-L/opt/homebrew/Cellar/glew/2.2.0_1/lib",
                 "-o",
